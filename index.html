@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NodeFlow - Interactive Node Pipeline & Parameter Guide</title>
+  
+  <!-- Tailwind CSS & React CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brandDark: '#0c0d11',
+            cardDark: '#161922',
+            borderDark: '#262a35',
+            brandLight: '#f8fafc',
+            cardLight: '#ffffff',
+            borderLight: '#e2e8f0',
+          }
+        }
+      }
+    }
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Pretendard Font -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+  <style>
+    html {
+      overflow-y: scroll;
+    }
+    body, * {
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
+      transition-property: background-color, border-color, color, fill, stroke;
+      transition-duration: 150ms;
+      transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 6px;
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(150, 150, 150, 0.25);
+      border-radius: 9999px;
+    }
+    .fixed-node-grid-dark {
+      background-size: 24px 24px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    }
+    .fixed-node-grid-light {
+      background-size: 24px 24px;
+      background-image: 
+        linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="bg-brandLight dark:bg-brandDark text-zinc-800 dark:text-zinc-200 min-h-screen selection:bg-emerald-500/30">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useLayoutEffect, useCallback } = React;
+
+    const PROGRAM_CONFIG = {
+      ComfyUI: {
+        name: "ComfyUI",
+        accent: "#10b981",
+        categories: {
+          Loader: { label: "Loader", bg: "bg-sky-500", text: "text-sky-400", hex: "#38bdf8" },
+          Conditioning: { label: "Conditioning", bg: "bg-amber-500", text: "text-amber-400", hex: "#f59e0b" },
+          Latent: { label: "Latent", bg: "bg-pink-500", text: "text-pink-400", hex: "#ec4899" },
+          Sampling: { label: "Sampling", bg: "bg-indigo-500", text: "text-indigo-400", hex: "#6366f1" },
+          Mask_Image: { label: "Mask / Image", bg: "bg-emerald-500", text: "text-emerald-400", hex: "#10b981" },
+          Output: { label: "Output", bg: "bg-zinc-400", text: "text-zinc-300", hex: "#a1a1aa" }
+        },
+        placeholder: "예: SDXL 모델로 2배 고화질 업스케일 및 페이스 디테일러 파이프라인 구성해줘 (이미지 첨부 시 참조)",
+        defaultWorkflow: {
+          title: "기본 텍스트-투-이미지 (Text-to-Image) 표준 파이프라인",
+          desc: "체크포인트 모델과 빈 잠재 공간(Empty Latent)이 로드되어 긍정/부정 프롬프트 조건화와 KSampler 디노이징을 거치는 표준 워크플로우",
+          generalGuide: "ComfyUI의 가장 기초적이고 신뢰성 높은 Text-to-Image 표준 아키텍처입니다. Checkpoint에서 출력되는 MODEL, CLIP, VAE가 각각 알맞은 샘플러와 텍스트 인코더, 디코더에 매핑되어 작동합니다.",
+          stages: [
+            {
+              stageName: "01. Input & Model Loaders",
+              nodes: [
+                {
+                  id: "c-1",
+                  category: "Loader",
+                  name: "Load Checkpoint",
+                  summary: "기본 확산 모델, CLIP, VAE 적재",
+                  details: "신경망 베이스 가중치(MODEL), 프롬프트 토크나이저(CLIP), 잠재공간 변환기(VAE)를 메모리에 로드합니다.",
+                  tip: "목적에 맞는 safetensors 체크포인트를 선택하세요.",
+                  outLabel: "MODEL, CLIP, VAE",
+                  params: [
+                    { key: "ckpt_name", val: "v1-5-pruned-emaonly.safetensors", desc: "사용할 베이스 체크포인트 모델" }
+                  ]
+                },
+                {
+                  id: "c-2",
+                  category: "Latent",
+                  name: "Empty Latent Image",
+                  summary: "초기 잠재 공간(Latent) 텐서 생성",
+                  details: "노이즈가 주입되어 디퓨전이 시작될 캔버스의 해상도와 배치 크기를 정의합니다.",
+                  tip: "SD 1.5는 512x512, SDXL은 1024x1024 기본 해상도를 권장합니다.",
+                  outLabel: "LATENT",
+                  params: [
+                    { key: "width / height", val: "512 x 512", desc: "생성 이미지 기본 해상도" },
+                    { key: "batch_size", val: "1", desc: "1회 생성 시 생성 매수" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "02. Conditioning",
+              nodes: [
+                {
+                  id: "c-3",
+                  category: "Conditioning",
+                  name: "CLIP Text Encode (Positive)",
+                  summary: "긍정 프롬프트 텍스트 조건화",
+                  details: "사용자가 원하는 화풍, 피사체, 조명 및 디테일을 CLIP 인코더를 통해 텐서 조건으로 변환합니다.",
+                  tip: "핵심 키워드를 앞쪽에 배치하면 가중치가 더 잘 반영됩니다.",
+                  outLabel: "CONDITIONING",
+                  params: [
+                    { key: "text", val: "masterpiece, highly detailed, photorealistic, cinematic lighting, 8k", desc: "긍정 프롬프트 입력" }
+                  ]
+                },
+                {
+                  id: "c-4",
+                  category: "Conditioning",
+                  name: "CLIP Text Encode (Negative)",
+                  summary: "부정 프롬프트 텍스트 조건화",
+                  details: "결과물에서 배제하고 싶은 왜곡, 결함, 불필요한 스타일 요소를 제어합니다.",
+                  tip: "과도한 부정 프롬프트는 이미지의 채도나 대비를 떨어뜨릴 수 있습니다.",
+                  outLabel: "CONDITIONING",
+                  params: [
+                    { key: "text", val: "worst quality, low quality, deformed, blurry, bad anatomy", desc: "부정 프롬프트 입력" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "03. Diffusion Sampling",
+              nodes: [
+                {
+                  id: "c-5",
+                  category: "Sampling",
+                  name: "KSampler",
+                  summary: "노이즈 제거 및 잠재 이미지 합성",
+                  details: "Model과 조건화 데이터, Latent 노이즈를 취합하여 스텝 수에 맞춰 점진적으로 디노이징합니다.",
+                  tip: "steps 20~25, cfg 7.0 수준이 가장 표준적이고 실패 확률이 낮습니다.",
+                  outLabel: "LATENT",
+                  params: [
+                    { key: "steps", val: "20", desc: "디노이징 반복 횟수" },
+                    { key: "cfg", val: "7.0", desc: "프롬프트 추종 강도" },
+                    { key: "sampler_name", val: "euler", desc: "기본 오일러 샘플러" },
+                    { key: "scheduler", val: "normal", desc: "표준 노이즈 스케줄러" },
+                    { key: "denoise", val: "1.00", desc: "완전한 신규 생성 모드" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "04. Output & Preview",
+              nodes: [
+                {
+                  id: "c-6",
+                  category: "Output",
+                  name: "Save Image",
+                  summary: "VAE 디코딩 및 픽셀 이미지 저장",
+                  details: "생성 완료된 잠재 공간 텐서를 VAE로 픽셀 복원하여 최종 파일로 저장합니다.",
+                  tip: "메타데이터가 이미지에 자동 포함되어 재사용이 가능합니다.",
+                  outLabel: null,
+                  params: [
+                    { key: "filename_prefix", val: "NodeFlow_Output", desc: "저장될 파일 접두사" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      Blender: {
+        name: "Blender",
+        accent: "#10b981",
+        categories: {
+          Input: { label: "Input", bg: "bg-red-500", text: "text-red-400", hex: "#ef4444" },
+          Texture: { label: "Texture", bg: "bg-orange-500", text: "text-orange-400", hex: "#f97316" },
+          Color_Vector: { label: "Color / Vector", bg: "bg-blue-500", text: "text-blue-400", hex: "#3b82f6" },
+          Converter: { label: "Converter", bg: "bg-emerald-500", text: "text-emerald-400", hex: "#10b981" },
+          Shader: { label: "Shader", bg: "bg-purple-500", text: "text-purple-400", hex: "#a855f7" },
+          Output: { label: "Output", bg: "bg-zinc-400", text: "text-zinc-300", hex: "#a1a1aa" }
+        },
+        placeholder: "예: 긁힌 자국(Scratch)과 먼지가 낀 사실적인 PBR 금속 셰이더 노드 만들어줘",
+        defaultWorkflow: {
+          title: "Blender 표준 PBR 머티리얼 셰이더",
+          desc: "텍스처 좌표계와 노이즈가 Principled BSDF에 연결되어 뷰포트 서피스로 출력되는 기본 셰이더 트리",
+          generalGuide: "Blender의 가장 기본적이고 표준적인 물리 기반 렌더링(PBR) 셰이더 구성입니다. UV/Object 좌표계를 거쳐 계산된 텍스처 데이터가 Principled BSDF를 통해 Cycles/Eevee 엔진에 출력됩니다.",
+          stages: [
+            {
+              stageName: "01. Coordinates & Inputs",
+              nodes: [
+                {
+                  id: "b-1",
+                  category: "Input",
+                  name: "Texture Coordinate",
+                  summary: "메시 UV / 오브젝트 좌표계 생성",
+                  details: "3D 메시 표면에 텍스처를 왜곡 없이 매핑하기 위한 기준 벡터 좌표를 생성합니다.",
+                  tip: "이음새 왜곡 방지 시 Object 좌표를 권장합니다.",
+                  outLabel: "Vector",
+                  params: [
+                    { key: "Output Socket", val: "Object", desc: "절차적 3D 투영 좌표" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "02. Mapping & Texture",
+              nodes: [
+                {
+                  id: "b-2",
+                  category: "Color_Vector",
+                  name: "Mapping",
+                  summary: "좌표계 스케일 및 위치 조정",
+                  details: "텍스처의 타일링 반복 주기와 회전 각도를 균일하게 조정합니다.",
+                  tip: "스케일 수치로 텍스처 밀도를 조절하세요.",
+                  outLabel: "Vector",
+                  params: [
+                    { key: "Scale (X/Y/Z)", val: "2.0", desc: "텍스처 반복 밀도" }
+                  ]
+                },
+                {
+                  id: "b-3",
+                  category: "Texture",
+                  name: "Noise Texture",
+                  summary: "표면 질감용 절차적 노이즈",
+                  details: "수학적 알고리즘으로 표면의 불규칙한 요철 및 거칠기 맵을 계산합니다.",
+                  tip: "Detail 8 이상 설정 시 사실적인 질감이 부여됩니다.",
+                  outLabel: "Color, Fac",
+                  params: [
+                    { key: "Scale", val: "10.0", desc: "노이즈 크기" },
+                    { key: "Detail", val: "8.0", desc: "프랙탈 복잡도" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "03. Shading Engine",
+              nodes: [
+                {
+                  id: "b-4",
+                  category: "Shader",
+                  name: "Principled BSDF",
+                  summary: "물리기반 표면 셰이딩",
+                  details: "광학 물리 법칙에 기반하여 금속성, 거칠기, 반사율을 통합 시뮬레이션합니다.",
+                  tip: "Roughness를 연결하여 실감나는 반사를 표현하세요.",
+                  outLabel: "BSDF",
+                  params: [
+                    { key: "Base Color", val: "#C8C8C8", desc: "기본 표면 색상" },
+                    { key: "Roughness", val: "0.4", desc: "기본 표면 거칠기" }
+                  ]
+                }
+              ]
+            },
+            {
+              stageName: "04. Material Output",
+              nodes: [
+                {
+                  id: "b-5",
+                  category: "Output",
+                  name: "Material Output",
+                  summary: "뷰포트 서피스 최종 바인딩",
+                  details: "완성된 셰이더 트리를 실제 3D 오브젝트 Surface에 렌더링합니다.",
+                  tip: "Surface 소켓에 반드시 연결되어야 렌더 엔진이 인식합니다.",
+                  outLabel: null,
+                  params: [
+                    { key: "Target", val: "All Engines", desc: "Cycles 및 Eevee 공용" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    };
+
+    function App() {
+      const [isDarkMode, setIsDarkMode] = useState(true);
+      const [platform, setPlatform] = useState('ComfyUI');
+      const [query, setQuery] = useState('');
+      const [pipeline, setPipeline] = useState(PROGRAM_CONFIG.ComfyUI.defaultWorkflow);
+      const [isCustomGenerated, setIsCustomGenerated] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [selectedNode, setSelectedNode] = useState(null);
+      const [hoveredNodeId, setHoveredNodeId] = useState(null);
+      const [savedNodes, setSavedNodes] = useState([]);
+      const [savedPipelines, setSavedPipelines] = useState([]);
+      const [viewSavedTab, setViewSavedTab] = useState(false);
+      const [isSavedViewing, setIsSavedViewing] = useState(false);
+      const [loadedSavedIndex, setLoadedSavedIndex] = useState(null);
+      const [toastMessage, setToastMessage] = useState('');
+      const [showScrollTop, setShowScrollTop] = useState(false);
+
+      const [currentUser, setCurrentUser] = useState(null);
+      const [authModal, setAuthModal] = useState(null);
+      const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', newPassword: '' });
+      const [foundAccountInfo, setFoundAccountInfo] = useState(null);
+
+      const [isPipelineOpen, setIsPipelineOpen] = useState(true);
+      const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+      const [canvasZoom, setCanvasZoom] = useState(1);
+      const canvasContainerRef = useRef(null);
+      const canvasBoardRef = useRef(null);
+
+      const isDraggingCanvasRef = useRef(false);
+      const dragStartPosRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+      const [isCanvasGrabbing, setIsCanvasGrabbing] = useState(false);
+
+      const [connections, setConnections] = useState([]);
+      const nodeRefs = useRef({});
+
+      const [attachedImage, setAttachedImage] = useState(null);
+      const fileInputRef = useRef(null);
+
+      const [dialogConfig, setDialogConfig] = useState(null);
+      const [promptInputValue, setPromptInputValue] = useState('');
+
+      const [dashMemoInput, setDashMemoInput] = useState('');
+      const [dashLinkInput, setDashLinkInput] = useState('');
+      const dashImageInputRef = useRef(null);
+
+      const currentConfig = PROGRAM_CONFIG[platform];
+
+      // API Key 상태 (기본값 빈 문자열)
+      const [geminiApiKey, setGeminiApiKey] = useState("");
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(''), 3000);
+      };
+
+      const showCustomAlert = (title, message) => {
+        setDialogConfig({
+          type: 'alert',
+          title,
+          message,
+          onConfirm: () => setDialogConfig(null)
+        });
+      };
+
+      const showCustomConfirm = (title, message, onConfirmCallback) => {
+        setDialogConfig({
+          type: 'confirm',
+          title,
+          message,
+          onConfirm: () => {
+            setDialogConfig(null);
+            if (onConfirmCallback) onConfirmCallback();
+          },
+          onCancel: () => setDialogConfig(null)
+        });
+      };
+
+      const showCustomPrompt = (title, message, defaultValue, onConfirmCallback) => {
+        setPromptInputValue(defaultValue || '');
+        setDialogConfig({
+          type: 'prompt',
+          title,
+          message,
+          onConfirm: (val) => {
+            setDialogConfig(null);
+            if (onConfirmCallback) onConfirmCallback(val);
+          },
+          onCancel: () => setDialogConfig(null)
+        });
+      };
+
+      useEffect(() => {
+        if (isDarkMode) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }, [isDarkMode]);
+
+      // 브라우저 로컬 저장소 초기화 및 점검
+      useEffect(() => {
+        const storedKey = localStorage.getItem('nodeflow_gemini_key');
+        const storedTheme = localStorage.getItem('nodeflow_theme');
+        const loggedUser = localStorage.getItem('nodeflow_logged_user');
+
+        // 이전에 남아있던 하드코딩된 예전 키 패턴(AQ.Ab8RN...)이 저장소에 남아있을 경우 강제 삭제
+        if (storedKey && storedKey.startsWith("AQ.Ab8RN")) {
+          localStorage.removeItem('nodeflow_gemini_key');
+          setGeminiApiKey("");
+        } else if (storedKey) {
+          setGeminiApiKey(storedKey);
+        } else {
+          setGeminiApiKey("");
+        }
+
+        if (storedTheme) setIsDarkMode(storedTheme === 'dark');
+
+        if (loggedUser) {
+          const userObj = JSON.parse(loggedUser);
+          setCurrentUser(userObj);
+          loadUserData(userObj.username);
+        } else {
+          setCurrentUser(null);
+          loadUserData(null);
+        }
+      }, []);
+
+      const loadUserData = (username) => {
+        if (!username) {
+          setSavedNodes([]);
+          setSavedPipelines([]);
+          return;
+        }
+        const prefix = `nodeflow_user_${username}`;
+        const storedNodes = localStorage.getItem(`${prefix}_nodes`);
+        const storedPipelines = localStorage.getItem(`${prefix}_pipelines`);
+        setSavedNodes(storedNodes ? JSON.parse(storedNodes) : []);
+        setSavedPipelines(storedPipelines ? JSON.parse(storedPipelines) : []);
+      };
+
+      const saveCurrentUserData = (updatedNodes, updatedPipelines) => {
+        if (!currentUser) return;
+        const prefix = `nodeflow_user_${currentUser.username}`;
+        if (updatedNodes !== undefined) {
+          setSavedNodes(updatedNodes);
+          localStorage.setItem(`${prefix}_nodes`, JSON.stringify(updatedNodes));
+        }
+        if (updatedPipelines !== undefined) {
+          setSavedPipelines(updatedPipelines);
+          localStorage.setItem(`${prefix}_pipelines`, JSON.stringify(updatedPipelines));
+        }
+      };
+
+      const handleRegister = (e) => {
+        e.preventDefault();
+        const { username, password, email } = authForm;
+        if (!username.trim() || !password.trim() || !email.trim()) {
+          showCustomAlert("입력 확인", "아이디, 비밀번호, 복구용 이메일을 모두 입력해주세요.");
+          return;
+        }
+
+        const users = JSON.parse(localStorage.getItem('nodeflow_registered_users') || '[]');
+        if (users.some(u => u.username === username.trim())) {
+          showCustomAlert("가입 오류", "이미 존재하는 아이디입니다.");
+          return;
+        }
+
+        const newUser = { username: username.trim(), password: password.trim(), email: email.trim() };
+        users.push(newUser);
+        localStorage.setItem('nodeflow_registered_users', JSON.stringify(users));
+
+        setCurrentUser(newUser);
+        localStorage.setItem('nodeflow_logged_user', JSON.stringify(newUser));
+        loadUserData(newUser.username);
+        setAuthModal(null);
+        setAuthForm({ username: '', password: '', email: '', newPassword: '' });
+        showToast(`환영합니다, ${newUser.username}님! 가입 및 로그인되었습니다.`);
+      };
+
+      const handleLogin = (e) => {
+        e.preventDefault();
+        const { username, password } = authForm;
+        const users = JSON.parse(localStorage.getItem('nodeflow_registered_users') || '[]');
+        const target = users.find(u => u.username === username.trim() && u.password === password.trim());
+
+        if (!target) {
+          showCustomAlert("로그인 실패", "아이디 또는 비밀번호가 일치하지 않습니다.");
+          return;
+        }
+
+        setCurrentUser(target);
+        localStorage.setItem('nodeflow_logged_user', JSON.stringify(target));
+        loadUserData(target.username);
+        setAuthModal(null);
+        setAuthForm({ username: '', password: '', email: '', newPassword: '' });
+        showToast(`${target.username}님으로 로그인되었습니다.`);
+      };
+
+      const handleLogout = () => {
+        showCustomConfirm("로그아웃", "로그아웃 하시겠습니까?", () => {
+          localStorage.removeItem('nodeflow_logged_user');
+          setCurrentUser(null);
+          loadUserData(null);
+          handleGoHome();
+          showToast("로그아웃되었습니다.");
+        });
+      };
+
+      const handleFindAccount = (e) => {
+        e.preventDefault();
+        const { email, newPassword } = authForm;
+        if (!email.trim()) {
+          showCustomAlert("이메일 입력", "가입 시 등록했던 이메일을 입력해주세요.");
+          return;
+        }
+
+        const users = JSON.parse(localStorage.getItem('nodeflow_registered_users') || '[]');
+        const userIndex = users.findIndex(u => u.email === email.trim());
+
+        if (userIndex === -1) {
+          showCustomAlert("확인 실패", "해당 이메일로 가입된 계정을 찾을 수 없습니다.");
+          return;
+        }
+
+        if (newPassword && newPassword.trim()) {
+          users[userIndex].password = newPassword.trim();
+          localStorage.setItem('nodeflow_registered_users', JSON.stringify(users));
+          showToast("비밀번호가 재설정되었습니다. 새 비밀번호로 로그인해주세요.");
+          setFoundAccountInfo(null);
+          setAuthModal('login');
+          setAuthForm({ username: users[userIndex].username, password: '', email: '', newPassword: '' });
+        } else {
+          setFoundAccountInfo({ username: users[userIndex].username, email: users[userIndex].email });
+        }
+      };
+
+      useEffect(() => {
+        const checkScroll = () => {
+          if (window.scrollY > 150) {
+            setShowScrollTop(true);
+          } else {
+            setShowScrollTop(false);
+          }
+        };
+        window.addEventListener('scroll', checkScroll);
+        return () => window.removeEventListener('scroll', checkScroll);
+      }, []);
+
+      const scrollToTop = () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      useEffect(() => {
+        const el = canvasContainerRef.current;
+        if (!el || !isPipelineOpen) return;
+
+        const onWheelHandler = (e) => {
+          e.preventDefault();
+          const zoomDelta = e.deltaY * -0.0015;
+          setCanvasZoom((prev) => {
+            const next = Math.min(Math.max(prev + zoomDelta, 0.65), 1.25);
+            return parseFloat(next.toFixed(2));
+          });
+        };
+
+        el.addEventListener('wheel', onWheelHandler, { passive: false });
+        return () => el.removeEventListener('wheel', onWheelHandler);
+      }, [isPipelineOpen, isSavedViewing, platform, pipeline]);
+
+      useEffect(() => {
+        const el = canvasContainerRef.current;
+        if (!el || !isPipelineOpen) return;
+
+        const onMouseDown = (e) => {
+          if (e.target.closest('button') || e.target.closest('input')) return;
+          isDraggingCanvasRef.current = true;
+          setIsCanvasGrabbing(true);
+          dragStartPosRef.current = {
+            x: e.pageX - el.offsetLeft,
+            y: e.pageY - el.offsetTop,
+            scrollLeft: el.scrollLeft,
+            scrollTop: el.scrollTop
+          };
+        };
+
+        const onMouseMove = (e) => {
+          if (!isDraggingCanvasRef.current) return;
+          e.preventDefault();
+          const x = e.pageX - el.offsetLeft;
+          const y = e.pageY - el.offsetTop;
+          const walkX = (x - dragStartPosRef.current.x) * 1.2;
+          const walkY = (y - dragStartPosRef.current.y) * 1.2;
+          el.scrollLeft = dragStartPosRef.current.scrollLeft - walkX;
+          el.scrollTop = dragStartPosRef.current.scrollTop - walkY;
+        };
+
+        const onMouseUpOrLeave = () => {
+          isDraggingCanvasRef.current = false;
+          setIsCanvasGrabbing(false);
+        };
+
+        const onTouchStart = (e) => {
+          if (e.touches.length !== 1) return;
+          isDraggingCanvasRef.current = true;
+          const touch = e.touches[0];
+          dragStartPosRef.current = {
+            x: touch.pageX - el.offsetLeft,
+            y: touch.pageY - el.offsetTop,
+            scrollLeft: el.scrollLeft,
+            scrollTop: el.scrollTop
+          };
+        };
+
+        const onTouchMove = (e) => {
+          if (!isDraggingCanvasRef.current || e.touches.length !== 1) return;
+          const touch = e.touches[0];
+          const x = touch.pageX - el.offsetLeft;
+          const y = touch.pageY - el.offsetTop;
+          const walkX = (x - dragStartPosRef.current.x) * 1.2;
+          const walkY = (y - dragStartPosRef.current.y) * 1.2;
+          el.scrollLeft = dragStartPosRef.current.scrollLeft - walkX;
+          el.scrollTop = dragStartPosRef.current.scrollTop - walkY;
+        };
+
+        const onTouchEnd = () => {
+          isDraggingCanvasRef.current = false;
+        };
+
+        el.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUpOrLeave);
+
+        el.addEventListener('touchstart', onTouchStart, { passive: true });
+        el.addEventListener('touchmove', onTouchMove, { passive: true });
+        el.addEventListener('touchend', onTouchEnd);
+
+        return () => {
+          el.removeEventListener('mousedown', onMouseDown);
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUpOrLeave);
+
+          el.removeEventListener('touchstart', onTouchStart);
+          el.removeEventListener('touchmove', onTouchMove);
+          el.removeEventListener('touchend', onTouchEnd);
+        };
+      }, [isPipelineOpen, canvasZoom]);
+
+      const calculateConnections = useCallback(() => {
+        if (!canvasBoardRef.current || !isPipelineOpen) return;
+        const boardEl = canvasBoardRef.current;
+        const newConnections = [];
+        const stages = pipeline.stages || [];
+
+        for (let sIdx = 0; sIdx < stages.length - 1; sIdx++) {
+          const currentStage = stages[sIdx];
+          const nextStage = stages[sIdx + 1];
+
+          currentStage.nodes.forEach((srcNode) => {
+            const srcEl = nodeRefs.current[srcNode.id];
+            if (!srcEl) return;
+
+            let srcCurr = srcEl;
+            let srcX = 0;
+            let srcY = 0;
+            while (srcCurr && srcCurr !== boardEl) {
+              srcX += srcCurr.offsetLeft;
+              srcY += srcCurr.offsetTop;
+              srcCurr = srcCurr.offsetParent;
+            }
+
+            const x1 = srcX + srcEl.offsetWidth;
+            const y1 = srcY + srcEl.offsetHeight / 2;
+
+            nextStage.nodes.forEach((dstNode) => {
+              const dstEl = nodeRefs.current[dstNode.id];
+              if (!dstEl) return;
+
+              let dstCurr = dstEl;
+              let dstX = 0;
+              let dstY = 0;
+              while (dstCurr && dstCurr !== boardEl) {
+                dstX += dstCurr.offsetLeft;
+                dstY += dstCurr.offsetTop;
+                dstCurr = dstCurr.offsetParent;
+              }
+
+              const x2 = dstX;
+              const y2 = dstY + dstEl.offsetHeight / 2;
+
+              const srcCategory = currentConfig.categories[srcNode.category] || { hex: "#a1a1aa" };
+
+              newConnections.push({
+                id: `${srcNode.id}->${dstNode.id}`,
+                srcId: srcNode.id,
+                dstId: dstNode.id,
+                x1,
+                y1,
+                x2,
+                y2,
+                srcColor: srcCategory.hex,
+                label: srcNode.outLabel || null
+              });
+            });
+          });
+        }
+        setConnections(newConnections);
+      }, [pipeline, isPipelineOpen, platform, currentConfig]);
+
+      useLayoutEffect(() => {
+        calculateConnections();
+        const timer = setTimeout(calculateConnections, 50);
+        window.addEventListener('resize', calculateConnections);
+        return () => {
+          clearTimeout(timer);
+          window.removeEventListener('resize', calculateConnections);
+        };
+      }, [calculateConnections, canvasZoom]);
+
+      const toggleTheme = () => {
+        const next = !isDarkMode;
+        setIsDarkMode(next);
+        localStorage.setItem('nodeflow_theme', next ? 'dark' : 'light');
+      };
+
+      const handleGoHome = () => {
+        setViewSavedTab(false);
+        setIsSavedViewing(false);
+        setLoadedSavedIndex(null);
+        setPipeline(PROGRAM_CONFIG[platform].defaultWorkflow);
+        setIsCustomGenerated(false);
+        setIsPipelineOpen(true);
+        setIsGuideOpen(false);
+        setCanvasZoom(1);
+      };
+
+      const handleSwitchPlatform = (newPlatform) => {
+        setPlatform(newPlatform);
+        setPipeline(PROGRAM_CONFIG[newPlatform].defaultWorkflow);
+        setSelectedNode(null);
+        setHoveredNodeId(null);
+        setIsSavedViewing(false);
+        setLoadedSavedIndex(null);
+        setIsCustomGenerated(false);
+        setIsPipelineOpen(true);
+        setIsGuideOpen(false);
+        setCanvasZoom(1);
+      };
+
+      // API Key 입력 팝업
+      const handleSaveKey = () => {
+        showCustomPrompt(
+          "Google Gemini API Key 등록",
+          "AI 노드 파이프라인 생성을 위해 사용자 본인의 Google Gemini API 키를 입력해주세요.\n(Google AI Studio에서 무료로 발급받으실 수 있으며, 입력된 키는 외부 서버로 전송되지 않고 본인 브라우저에만 안전하게 보관됩니다.)",
+          geminiApiKey,
+          (key) => {
+            if (key !== null) {
+              const trimmed = key.trim();
+              setGeminiApiKey(trimmed);
+              if (trimmed) {
+                localStorage.setItem('nodeflow_gemini_key', trimmed);
+                showToast("API Key가 안전하게 저장되었습니다.");
+              } else {
+                localStorage.removeItem('nodeflow_gemini_key');
+                showToast("API Key가 삭제되었습니다.");
+              }
+            }
+          }
+        );
+      };
+
+      const toggleSaveNode = (node) => {
+        if (!currentUser) {
+          showCustomConfirm(
+            "로그인 필요",
+            "노드를 보관함에 저장하려면 로그인이 필요합니다.\n로그인 화면으로 이동하시겠습니까?",
+            () => {
+              setAuthModal('login');
+            }
+          );
+          return;
+        }
+
+        const exists = savedNodes.some(n => n.id === node.id);
+        const updated = exists ? savedNodes.filter(n => n.id !== node.id) : [...savedNodes, { ...node, platform }];
+        saveCurrentUserData(updated, undefined);
+        showToast(exists ? "노드 저장이 해제되었습니다." : "노드가 보관함에 저장되었습니다.");
+      };
+
+      const saveCurrentPipeline = () => {
+        if (!currentUser) {
+          showCustomConfirm(
+            "로그인 필요",
+            "파이프라인을 보관함에 저장하려면 로그인이 필요합니다.\n로그인 화면으로 이동하시겠습니까?",
+            () => {
+              setAuthModal('login');
+            }
+          );
+          return;
+        }
+
+        const exists = savedPipelines.some(p => p.title === pipeline.title);
+        if (!exists) {
+          const updated = [
+            ...savedPipelines, 
+            { 
+              ...pipeline, 
+              platform, 
+              savedAt: new Date().toLocaleDateString(),
+              dashboard: { memos: [], links: [], images: [] }
+            }
+          ];
+          saveCurrentUserData(undefined, updated);
+          showToast("파이프라인이 저장되었습니다.");
+        } else {
+          showCustomAlert("알림", "이미 보관함에 저장되어 있는 파이프라인입니다.");
+        }
+      };
+
+      const handleDeleteSavedPipeline = (e, index) => {
+        e.stopPropagation();
+        showCustomConfirm(
+          "파이프라인 삭제",
+          "정말로 이 파이프라인을 보관함에서 삭제하시겠습니까?",
+          () => {
+            const updated = savedPipelines.filter((_, idx) => idx !== index);
+            saveCurrentUserData(undefined, updated);
+            if (loadedSavedIndex === index) {
+              handleGoHome();
+            }
+            showToast("파이프라인이 삭제되었습니다.");
+          }
+        );
+      };
+
+      const handleLoadSavedPipeline = (savedItem, index) => {
+        if (savedItem.platform && savedItem.platform !== platform) {
+          setPlatform(savedItem.platform);
+        }
+        setPipeline(savedItem);
+        setIsCustomGenerated(true);
+        setViewSavedTab(false);
+        setIsSavedViewing(true);
+        setLoadedSavedIndex(index);
+        setIsPipelineOpen(true);
+        setIsGuideOpen(false);
+        setCanvasZoom(1);
+        showToast(`'${savedItem.title}' 파이프라인을 불러왔습니다.`);
+      };
+
+      const addBottomDashboardMemo = () => {
+        if (!dashMemoInput.trim() || loadedSavedIndex === null) return;
+        const updated = [...savedPipelines];
+        if (!updated[loadedSavedIndex].dashboard) {
+          updated[loadedSavedIndex].dashboard = { memos: [], links: [], images: [] };
+        }
+        updated[loadedSavedIndex].dashboard.memos.push(dashMemoInput.trim());
+        saveCurrentUserData(undefined, updated);
+        setPipeline({ ...updated[loadedSavedIndex] });
+        setDashMemoInput('');
+        showToast("메모가 추가되었습니다.");
+      };
+
+      const deleteBottomDashboardMemo = (mIdx) => {
+        if (loadedSavedIndex === null) return;
+        const updated = [...savedPipelines];
+        updated[loadedSavedIndex].dashboard.memos.splice(mIdx, 1);
+        saveCurrentUserData(undefined, updated);
+        setPipeline({ ...updated[loadedSavedIndex] });
+        showToast("메모가 삭제되었습니다.");
+      };
+
+      const addBottomDashboardLink = () => {
+        if (!dashLinkInput.trim() || loadedSavedIndex === null) return;
+        const updated = [...savedPipelines];
+        if (!updated[loadedSavedIndex].dashboard) {
+          updated[loadedSavedIndex].dashboard = { memos: [], links: [], images: [] };
+        }
+        updated[loadedSavedIndex].dashboard.links.push(dashLinkInput.trim());
+        saveCurrentUserData(undefined, updated);
+        setPipeline({ ...updated[loadedSavedIndex] });
+        setDashLinkInput('');
+        showToast("링크가 추가되었습니다.");
+      };
+
+      const deleteBottomDashboardLink = (lIdx) => {
+        if (loadedSavedIndex === null) return;
+        const updated = [...savedPipelines];
+        updated[loadedSavedIndex].dashboard.links.splice(lIdx, 1);
+        saveCurrentUserData(undefined, updated);
+        setPipeline({ ...updated[loadedSavedIndex] });
+        showToast("링크가 삭제되었습니다.");
+      };
+
+      const handleBottomDashboardImageUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file || loadedSavedIndex === null) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const updated = [...savedPipelines];
+          if (!updated[loadedSavedIndex].dashboard) {
+            updated[loadedSavedIndex].dashboard = { memos: [], links: [], images: [] };
+          }
+          updated[loadedSavedIndex].dashboard.images.push(event.target.result);
+          saveCurrentUserData(undefined, updated);
+          setPipeline({ ...updated[loadedSavedIndex] });
+          showToast("참고 이미지가 등록되었습니다.");
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const deleteBottomDashboardImage = (iIdx) => {
+        if (loadedSavedIndex === null) return;
+        const updated = [...savedPipelines];
+        updated[loadedSavedIndex].dashboard.images.splice(iIdx, 1);
+        saveCurrentUserData(undefined, updated);
+        setPipeline({ ...updated[loadedSavedIndex] });
+        showToast("참고 이미지가 삭제되었습니다.");
+      };
+
+      const handleImageUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+          showCustomAlert("파일 형식 오류", "이미지 파일만 업로드할 수 있습니다.");
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const base64String = event.target.result.split(',')[1];
+          setAttachedImage({
+            base64: base64String,
+            mimeType: file.type,
+            name: file.name,
+            previewUrl: event.target.result
+          });
+          showToast("참조 이미지가 첨부되었습니다.");
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const removeAttachedImage = () => {
+        setAttachedImage(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      };
+
+      const handleGeneratePipeline = async (e) => {
+        e.preventDefault();
+        if (!query.trim() && !attachedImage) return;
+
+        if (!geminiApiKey || !geminiApiKey.trim()) {
+          showCustomConfirm(
+            "Gemini API Key 등록 필요",
+            "노드를 생성하려면 사용자 본인의 Google Gemini API Key가 필요합니다.\n지금 본인의 API 키를 입력하시겠습니까?",
+            () => {
+              handleSaveKey();
+            }
+          );
+          return;
+        }
+
+        setLoading(true);
+        setIsSavedViewing(false);
+        setLoadedSavedIndex(null);
+        setCanvasZoom(1);
+
+        const categoryKeys = Object.keys(currentConfig.categories).join(" | ");
+
+        const systemPrompt = `당신은 ${platform} 전문 테크니컬 아티스트이자 파이프라인 아키텍트입니다.
+사용자의 프롬프트와 제공된 참조 이미지를 분석하여 가장 완벽한 노드 워크플로우를 설계하세요.
+노드들이 단순 일렬이 아닌 다중 분기 및 수렴 구조로 생성하세요.
+
+★ 파라미터 지침: 각 노드마다 1~4개의 구체적 권장 파라미터 세팅(params 배열: key, val, desc)을 작성하세요.
+★ 종합 가이드(generalGuide): 파이프라인 전체를 구동할 때 필요한 핵심 설계 가이드 및 데이터 흐름 요약을 3문장 이내로 작성하세요.
+
+반드시 ${platform} 전용 공식 노드와 아래 카테고리만 사용하세요:
+[${categoryKeys}]
+
+순수 JSON 포맷으로만 응답하세요:
+{
+  "title": "워크플로우 이름",
+  "desc": "목적 및 핵심 설명",
+  "generalGuide": "파이프라인 전체 종합 설계 가이드",
+  "stages": [
+    {
+      "stageName": "01. Input & Model Loaders (병렬 시작)",
+      "nodes": [
+        {
+          "id": "node-1",
+          "category": "${categoryKeys} 중 하나",
+          "name": "공식 노드 정확한 명칭",
+          "summary": "간단 요약",
+          "details": "구체적인 역할 및 세부 설정법",
+          "tip": "실전 주의점 또는 추천 수치",
+          "outLabel": "출력 데이터/소켓명",
+          "params": [
+            { "key": "파라미터명", "val": "구체적인 추천값", "desc": "설정 이유나 역할 설명" }
+          ]
+        }
+      ]
+    },
+    { "stageName": "02. Processing & Conditioning", "nodes": [ ... ] },
+    { "stageName": "03. Core Engine / Sampler / BSDF", "nodes": [ ... ] },
+    { "stageName": "04. Output & Preview", "nodes": [ ... ] }
+  ]
+}`;
+
+        const targetModel = "models/gemini-3.8-flash";
+        const url = `https://generativelanguage.googleapis.com/v1beta/${targetModel}:generateContent?key=${geminiApiKey}`;
+
+        const parts = [{ text: `${systemPrompt}\n\n사용자 요청: ${query || "첨부된 이미지를 참조하여 이를 재현하거나 응용할 수 있는 파이프라인을 설계해줘"}` }];
+        if (attachedImage) {
+          parts.push({
+            inline_data: {
+              mime_type: attachedImage.mimeType,
+              data: attachedImage.base64
+            }
+          });
+        }
+
+        let attempts = 0;
+        let success = false;
+        let lastError = "";
+
+        while (attempts < 3 && !success) {
+          try {
+            attempts++;
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: parts }],
+                generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
+              })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+              lastError = data.error.message;
+              if (lastError.includes("high demand") || response.status === 429 || response.status === 503) {
+                await new Promise(r => setTimeout(r, 1200));
+                continue;
+              }
+              throw new Error(data.error.message);
+            }
+
+            let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+            rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+            const parsed = JSON.parse(rawText);
+            
+            if (!parsed.stages && parsed.nodes) {
+              parsed.stages = [
+                { stageName: "01. Input Stage", nodes: parsed.nodes.slice(0, 2) },
+                { stageName: "02. Processing Stage", nodes: parsed.nodes.slice(2, 4) },
+                { stageName: "03. Output Stage", nodes: parsed.nodes.slice(4) }
+              ].filter(s => s.nodes.length > 0);
+            }
+
+            setPipeline(parsed);
+            setIsCustomGenerated(true);
+            setIsPipelineOpen(true);
+            setIsGuideOpen(false);
+            success = true;
+            showToast("✨ 맞춤형 파이프라인 생성이 완료되었습니다!");
+          } catch (err) {
+            lastError = err.message;
+            if (attempts < 3) {
+              await new Promise(r => setTimeout(r, 1000));
+            }
+          }
+        }
+
+        if (!success) {
+          showCustomAlert(
+            "생성 오류 안내",
+            `API 키가 올바른지 확인해주세요. 구글 서버 트래픽이 지연될 수 있습니다.\n(상세 내용: ${lastError})`
+          );
+        }
+        setLoading(false);
+      };
+
+      const allNodes = (pipeline.stages || []).flatMap(s => s.nodes || []);
+      const currentDashboard = pipeline.dashboard || { memos: [], links: [], images: [] };
+
+      return (
+        <div className={`min-h-screen ${
+          isSavedViewing 
+            ? 'bg-slate-100/90 dark:bg-[#0b0e14]' 
+            : 'bg-brandLight dark:bg-brandDark'
+        }`}>
+          <div className="max-w-7xl mx-auto px-6 py-8">
+            
+            {/* 토스트 알림 팝업 */}
+            {toastMessage && (
+              <div className="fixed top-6 right-6 z-50 flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-black px-4 py-2.5 rounded-xl text-xs font-semibold border border-zinc-700 dark:border-zinc-300">
+                <svg className="w-3.5 h-3.5 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <span>{toastMessage}</span>
+              </div>
+            )}
+
+            {/* Header */}
+            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-borderLight dark:border-borderDark">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={handleGoHome}
+                  className="flex items-center gap-2 text-left group focus:outline-none"
+                  title="메인 홈으로 이동 (기본 노드 복원)"
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 group-hover:scale-125 transition-transform"></span>
+                  <h1 className="text-2xl font-black tracking-tight text-zinc-900 dark:text-white group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                    NODEFLOW
+                  </h1>
+                </button>
+
+                <div className="flex items-center bg-zinc-200/80 dark:bg-[#15181f] p-1 rounded-full border border-borderLight dark:border-borderDark">
+                  <button
+                    onClick={() => handleSwitchPlatform('ComfyUI')}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all ${
+                      platform === 'ComfyUI' 
+                        ? 'bg-white dark:bg-white text-black' 
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white'
+                    }`}
+                  >
+                    ComfyUI
+                  </button>
+                  <button
+                    onClick={() => handleSwitchPlatform('Blender')}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all ${
+                      platform === 'Blender' 
+                        ? 'bg-white dark:bg-white text-black' 
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white'
+                    }`}
+                  >
+                    Blender
+                  </button>
+                </div>
+              </div>
+
+              {/* Header Right Utilities */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={toggleTheme}
+                  className="px-3.5 py-1.5 rounded-full border border-borderLight dark:border-borderDark bg-white dark:bg-[#15181f] text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 transition-all"
+                >
+                  {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+                </button>
+
+                {currentUser ? (
+                  <button
+                    onClick={handleLogout}
+                    className="px-3.5 py-1.5 rounded-full border border-borderLight dark:border-borderDark bg-white dark:bg-[#15181f] text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 transition-all flex items-center gap-1.5"
+                    title="클릭하여 로그아웃"
+                  >
+                    <span>로그아웃</span>
+                    <span className="text-[10px] text-zinc-400">({currentUser.username})</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { setAuthModal('login'); setFoundAccountInfo(null); }}
+                    className="px-3.5 py-1.5 rounded-full border border-borderLight dark:border-borderDark bg-white dark:bg-[#15181f] text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 transition-all"
+                  >
+                    로그인
+                  </button>
+                )}
+
+                <button
+                  onClick={handleSaveKey}
+                  className="px-3.5 py-1.5 rounded-full border border-borderLight dark:border-borderDark bg-white dark:bg-[#15181f] text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 transition-all flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                    <circle cx="8" cy="15" r="4" />
+                    <path d="M10.85 12.15L19 4M15 8l3 3M17 6l2 2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="hidden sm:inline">API Key</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (viewSavedTab) {
+                      handleGoHome();
+                    } else {
+                      setViewSavedTab(true);
+                    }
+                  }}
+                  className={`px-4 py-1.5 rounded-full border border-borderLight dark:border-borderDark text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    viewSavedTab
+                      ? 'bg-zinc-900 text-white dark:bg-white dark:text-black font-semibold'
+                      : 'bg-white dark:bg-[#15181f] text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500'
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                    <path d="M4 6h16M4 10h16M4 14h16M4 18h16" strokeLinecap="round" />
+                  </svg>
+                  <span>{viewSavedTab ? '파이프라인 뷰' : `보관함 (${savedNodes.length + savedPipelines.length})`}</span>
+                </button>
+              </div>
+            </header>
+
+            {/* 메인 뷰 */}
+            {!viewSavedTab ? (
+              <main className="mt-8 space-y-10">
+
+                {/* 1. 프롬프트 및 이미지 첨부 입력 섹션 */}
+                {!isSavedViewing && (
+                  <div className="max-w-3xl">
+                    <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
+                      Find the Optimal Node Pipeline.
+                    </h2>
+                    <p className="text-zinc-600 dark:text-zinc-400 text-sm mb-6">
+                      {platform}에서 만들고 싶은 노드 조합을 적어보세요. 이미지를 첨부하면 이미지의 스타일과 구성 요소를 분석해 노드를 자동 추천합니다.
+                    </p>
+
+                    <form onSubmit={handleGeneratePipeline} className="space-y-3">
+                      <div className="relative flex items-center">
+                        <div className="absolute left-3 z-10">
+                          <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleImageUpload}
+                            accept="image/*"
+                            className="hidden"
+                            id="pipeline-image-upload"
+                          />
+                          <label
+                            htmlFor="pipeline-image-upload"
+                            className="w-8 h-8 rounded-full flex items-center justify-center bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 cursor-pointer transition-colors"
+                            title="참조 이미지 첨부"
+                          >
+                            <svg className="w-4 h-4 stroke-current stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </label>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                          placeholder={currentConfig.placeholder}
+                          className="w-full bg-white dark:bg-[#13161c] border border-borderLight dark:border-borderDark text-sm rounded-full py-4 pl-14 pr-32 text-zinc-900 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-zinc-500 dark:focus:border-zinc-400 transition-all"
+                        />
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="absolute right-2 bg-emerald-500 text-black px-5 py-2.5 rounded-full text-xs font-bold hover:bg-emerald-400 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {loading ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+                              <span>생성 중...</span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <span>실행</span>
+                              <svg className="w-3.5 h-3.5 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      {loading && (
+                        <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400 font-medium px-4 py-2.5 bg-zinc-200/50 dark:bg-zinc-800/50 rounded-2xl border border-borderLight dark:border-borderDark">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                          <span>Gemini 3.8 Flash가 이미지와 텍스트를 분석하여 최적의 파이프라인 노드를 구성 중입니다...</span>
+                        </div>
+                      )}
+
+                      {attachedImage && (
+                        <div className="relative inline-block mt-1 group">
+                          <img 
+                            src={attachedImage.previewUrl} 
+                            alt="Attached preview" 
+                            className="w-24 h-24 object-cover rounded-xl border border-borderLight dark:border-borderDark shadow-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={removeAttachedImage}
+                            className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-zinc-900/80 hover:bg-zinc-900 dark:bg-white/80 dark:hover:bg-white text-white dark:text-black flex items-center justify-center transition-transform hover:scale-110"
+                            title="이미지 제거"
+                          >
+                            <svg className="w-3.5 h-3.5 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                          </button>
+                        </div>
+                      )}
+                    </form>
+                  </div>
+                )}
+
+                {/* 카테고리 범례 */}
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <span className="text-xs font-medium bg-zinc-200/70 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 px-3 py-1 rounded-full border border-zinc-300/50 dark:border-zinc-700/60">
+                    {platform} Categories
+                  </span>
+                  {Object.entries(currentConfig.categories).map(([catKey, col]) => (
+                    <div key={catKey} className="flex items-center gap-1.5 bg-white dark:bg-[#14171f] px-3 py-1 rounded-full border border-borderLight dark:border-borderDark text-xs text-zinc-700 dark:text-zinc-300">
+                      <span className={`w-2 h-2 rounded-full ${col.bg}`}></span>
+                      <span>{col.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 2. 파이프라인 비주얼 보드 */}
+                <section className="bg-white dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-8 relative overflow-hidden">
+                  <div className={`flex items-start justify-between gap-4 pb-4 ${isPipelineOpen ? 'border-b border-borderLight dark:border-borderDark/60' : ''}`}>
+                    <div className="flex-1 min-w-0 pr-6">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                        <h3 className="text-lg font-bold text-zinc-900 dark:text-white tracking-wide truncate">{pipeline.title}</h3>
+                      </div>
+                      <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 leading-relaxed break-words">{pipeline.desc}</p>
+                    </div>
+
+                    <div className="flex items-center gap-4 flex-shrink-0 pt-0.5">
+                      {!isSavedViewing && (
+                        <button
+                          onClick={saveCurrentPipeline}
+                          className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors flex items-center gap-1 text-xs whitespace-nowrap"
+                          title="파이프라인 전체 저장"
+                        >
+                          <svg className="w-4 h-4 stroke-current stroke-[1.8] fill-none flex-shrink-0" viewBox="0 0 24 24">
+                            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M17 21v-8H7v8M7 3v5h8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          <span className="whitespace-nowrap">저장</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setIsPipelineOpen(!isPipelineOpen)}
+                        className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors flex-shrink-0"
+                        title={isPipelineOpen ? "접기" : "펼치기"}
+                        aria-label="Toggle Pipeline Section"
+                      >
+                        <svg 
+                          className={`w-4 h-4 stroke-current stroke-[2] fill-none transform transition-transform duration-200 ${isPipelineOpen ? 'rotate-180' : 'rotate-0'}`} 
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  {isPipelineOpen && (
+                    <div className="mt-6 relative">
+                      <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-white/80 dark:bg-[#151821]/80 backdrop-blur-xs border border-borderLight dark:border-borderDark/60 px-2.5 py-1 rounded-xl text-[11px] text-zinc-500 font-mono select-none">
+                        <span>{Math.round(canvasZoom * 100)}%</span>
+                        {canvasZoom !== 1 && (
+                          <button
+                            onClick={() => setCanvasZoom(1)}
+                            className="p-0.5 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
+                            title="100% 비율로 리셋"
+                          >
+                            <svg className="w-3.5 h-3.5 stroke-current stroke-[2] fill-none" viewBox="0 0 24 24">
+                              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+
+                      <div 
+                        ref={canvasContainerRef}
+                        className={`overflow-x-auto overflow-y-auto pb-8 pt-4 custom-scrollbar relative select-none rounded-2xl border border-borderLight dark:border-borderDark/40 ${
+                          isCanvasGrabbing ? 'cursor-grabbing' : 'cursor-grab'
+                        } ${isDarkMode ? 'fixed-node-grid-dark' : 'fixed-node-grid-light'}`}
+                        style={{ minHeight: '360px', maxHeight: '720px' }}
+                      >
+                        <div 
+                          ref={canvasBoardRef}
+                          style={{ 
+                            transform: `scale(${canvasZoom})`, 
+                            transformOrigin: 'top left',
+                            transition: 'transform 0.1s ease-out'
+                          }} 
+                          className="relative inline-block min-w-max p-8"
+                        >
+                          <svg 
+                            className="absolute inset-0 pointer-events-none w-full h-full"
+                            style={{ zIndex: 0 }}
+                          >
+                            {connections.map((c) => {
+                              const deltaX = Math.abs(c.x2 - c.x1);
+                              const controlOffset = Math.max(deltaX * 0.45, 50);
+                              const d = `M ${c.x1} ${c.y1} C ${c.x1 + controlOffset} ${c.y1}, ${c.x2 - controlOffset} ${c.y2}, ${c.x2} ${c.y2}`;
+                              const midX = (c.x1 + c.x2) / 2;
+                              const midY = (c.y1 + c.y2) / 2;
+
+                              const isConnectedToHovered = hoveredNodeId && (c.srcId === hoveredNodeId || c.dstId === hoveredNodeId);
+                              const isDimmed = hoveredNodeId && !isConnectedToHovered;
+
+                              const labelText = c.label ? c.label.split(',')[0] : '';
+                              const badgeWidth = Math.max(labelText.length * 7.5 + 24, 56);
+                              const halfWidth = badgeWidth / 2;
+
+                              return (
+                                <g 
+                                  key={c.id} 
+                                  className={`transition-all duration-200 ${isDimmed ? 'opacity-20' : isConnectedToHovered ? 'opacity-100' : 'opacity-70'}`}
+                                >
+                                  <path
+                                    d={d}
+                                    fill="none"
+                                    stroke={isConnectedToHovered ? c.srcColor : "currentColor"}
+                                    className={isConnectedToHovered ? "" : "text-zinc-300 dark:text-zinc-700"}
+                                    strokeWidth={isConnectedToHovered ? "2.5" : "1.8"}
+                                    strokeLinecap="round"
+                                  />
+                                  <circle cx={c.x1} cy={c.y1} r={isConnectedToHovered ? "4" : "3"} fill={isConnectedToHovered ? c.srcColor : "#a1a1aa"} />
+                                  <circle cx={c.x2} cy={c.y2} r={isConnectedToHovered ? "4" : "3"} fill={isConnectedToHovered ? c.srcColor : "#a1a1aa"} />
+
+                                  {isConnectedToHovered && labelText && (
+                                    <g transform={`translate(${midX}, ${midY})`}>
+                                      <rect
+                                        x={-halfWidth}
+                                        y="-10"
+                                        width={badgeWidth}
+                                        height="20"
+                                        rx="10"
+                                        fill={c.srcColor}
+                                        fillOpacity="0.95"
+                                        className="shadow-sm"
+                                      />
+                                      <text
+                                        x="0"
+                                        y="4"
+                                        textAnchor="middle"
+                                        fill="#ffffff"
+                                        className="text-[9.5px] font-bold select-none pointer-events-none tracking-tight"
+                                      >
+                                        {labelText}
+                                      </text>
+                                    </g>
+                                  )}
+                                </g>
+                              );
+                            })}
+                          </svg>
+
+                          {/* 노드 스테이지 컬럼 */}
+                          <div className="flex items-start gap-16 md:gap-24 relative" style={{ zIndex: 1 }}>
+                            {(pipeline.stages || []).map((stage, sIdx) => (
+                              <div key={sIdx} className="flex flex-col w-80">
+                                <div className="text-[11px] font-bold tracking-wider uppercase text-zinc-500 dark:text-zinc-400 flex items-center gap-2 px-1 mb-5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                  <span>{stage.stageName}</span>
+                                </div>
+
+                                <div className="flex flex-col space-y-6">
+                                  {stage.nodes.map((node) => {
+                                    const col = currentConfig.categories[node.category] || { bg: "bg-zinc-400", label: node.category, hex: "#a1a1aa" };
+                                    const isSaved = savedNodes.some(n => n.id === node.id);
+                                    const isHovered = hoveredNodeId === node.id;
+
+                                    return (
+                                      <div
+                                        key={node.id}
+                                        ref={(el) => (nodeRefs.current[node.id] = el)}
+                                        onClick={() => setSelectedNode(node)}
+                                        onMouseEnter={() => setHoveredNodeId(node.id)}
+                                        onMouseLeave={() => setHoveredNodeId(null)}
+                                        className={`bg-white/95 dark:bg-[#161922]/95 backdrop-blur-xs border rounded-2xl p-5 md:p-6 cursor-pointer transition-all duration-150 group relative flex flex-col justify-between ${
+                                          isHovered 
+                                            ? 'border-zinc-500 dark:border-zinc-400 ring-2 ring-zinc-400/20' 
+                                            : 'border-borderLight dark:border-borderDark hover:border-zinc-400 dark:hover:border-zinc-500'
+                                        }`}
+                                      >
+                                        {sIdx > 0 && (
+                                          <div className={`absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-[#161922] transition-colors ${isHovered ? 'bg-zinc-800 dark:bg-zinc-200' : 'bg-zinc-300 dark:bg-zinc-700'}`}></div>
+                                        )}
+                                        {sIdx < pipeline.stages.length - 1 && (
+                                          <div className={`absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-[#161922] transition-colors ${isHovered ? 'bg-zinc-800 dark:bg-zinc-200' : 'bg-zinc-300 dark:bg-zinc-700'}`}></div>
+                                        )}
+
+                                        <div>
+                                          <div className="flex items-center justify-between mb-3.5">
+                                            <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-[#0f1117] px-3 py-1 rounded-full border border-borderLight dark:border-borderDark/60">
+                                              <span className={`w-2 h-2 rounded-full ${col.bg}`}></span>
+                                              <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">{col.label || node.category}</span>
+                                            </div>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleSaveNode(node);
+                                              }}
+                                              className={`p-1 rounded-full transition-colors ${
+                                                isSaved 
+                                                  ? 'text-emerald-500' 
+                                                  : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'
+                                              }`}
+                                              title="노드 북마크"
+                                            >
+                                              <svg className="w-4 h-4 stroke-current stroke-2 fill-none" viewBox="0 0 24 24">
+                                                <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" fill={isSaved ? "currentColor" : "none"} />
+                                              </svg>
+                                            </button>
+                                          </div>
+
+                                          <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                                            {node.name}
+                                          </h4>
+                                          <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 line-clamp-2 leading-relaxed">
+                                            {node.summary}
+                                          </p>
+                                        </div>
+
+                                        <div className="mt-5 pt-3 border-t border-zinc-100 dark:border-borderDark/50 flex items-center justify-between text-[11px] text-zinc-500">
+                                          <span>상세 정보 보기</span>
+                                          <div className="flex items-center gap-2">
+                                            {node.outLabel && (
+                                              <span className="text-[9px] font-mono px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-borderLight dark:border-borderDark/60 max-w-[120px] truncate" title={node.outLabel}>
+                                                {node.outLabel.split(',')[0]}
+                                              </span>
+                                            )}
+                                            <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-2 fill-none group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24">
+                                              <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* 3. 노드별 추천 수치 및 조정 가이드 */}
+                <section className="bg-white dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-8">
+                  <div className={`flex items-center justify-between pb-4 ${isGuideOpen ? 'border-b border-borderLight dark:border-borderDark/60' : ''}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-zinc-400"></span>
+                      <h3 className="text-base md:text-lg font-bold text-zinc-900 dark:text-white">
+                        노드별 추천 수치 및 조정 가이드
+                      </h3>
+                    </div>
+
+                    <button
+                      onClick={() => setIsGuideOpen(!isGuideOpen)}
+                      className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                      title={isGuideOpen ? "접기" : "펼치기"}
+                      aria-label="Toggle Parameter Guide Section"
+                    >
+                      <svg 
+                        className={`w-4 h-4 stroke-current stroke-[2] fill-none transform transition-transform duration-200 ${isGuideOpen ? 'rotate-180' : 'rotate-0'}`} 
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {isGuideOpen && (
+                    <div className="mt-6 space-y-6">
+                      {!isCustomGenerated ? (
+                        <div className="bg-zinc-50 dark:bg-[#141720] border border-borderLight dark:border-borderDark/60 rounded-2xl p-5 md:p-6 text-xs md:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed flex items-center gap-3">
+                          <svg className="w-4 h-4 stroke-zinc-400 stroke-2 fill-none flex-shrink-0" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4m0-4h.01"/>
+                          </svg>
+                          <span>상단 프롬프트에 원하는 파이프라인 요구사항을 작성하여 실행하시면, 각 노드별 추천 파라미터 수치와 최적의 조정 가이드가 이곳에 정리되어 제공됩니다.</span>
+                        </div>
+                      ) : (
+                        <>
+                          {pipeline.generalGuide && (
+                            <div className="bg-zinc-50 dark:bg-[#141720] border border-borderLight dark:border-borderDark/60 rounded-2xl p-5 md:p-6 text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wider">
+                                <svg className="w-4 h-4 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+                                <span>파이프라인 아키텍처 설계 노트 & 튜닝 팁</span>
+                              </div>
+                              <p className="text-xs md:text-sm font-normal">
+                                {pipeline.generalGuide}
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {allNodes.map((node) => {
+                              const col = currentConfig.categories[node.category] || { bg: "bg-zinc-400", label: node.category };
+
+                              return (
+                                <div 
+                                  key={node.id}
+                                  className="bg-zinc-50 dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-2xl p-6 flex flex-col justify-between h-full hover:border-zinc-400 dark:hover:border-zinc-500 transition-all"
+                                >
+                                  <div className="space-y-4">
+                                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-borderDark/40">
+                                      <span className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${col.bg}`}></span>
+                                        <span>{node.name}</span>
+                                      </span>
+                                      <span className="text-[11px] text-zinc-500">{col.label}</span>
+                                    </div>
+
+                                    {node.params && node.params.length > 0 ? (
+                                      <div className="space-y-3">
+                                        {node.params.map((p, idx) => {
+                                          const isLongText = String(p.val).length > 25;
+                                          return (
+                                            <div key={idx} className="bg-white dark:bg-[#101217] p-3.5 rounded-xl border border-zinc-200/80 dark:border-borderDark/60">
+                                              {isLongText ? (
+                                                <div className="space-y-1.5">
+                                                  <span className="text-zinc-500 dark:text-zinc-400 text-[11px] font-semibold block">{p.key}</span>
+                                                  <div className="font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 p-2.5 rounded-lg text-xs leading-relaxed break-words max-h-24 overflow-y-auto custom-scrollbar">
+                                                    {p.val}
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <div className="flex items-center justify-between text-xs mb-1">
+                                                  <span className="text-zinc-500 dark:text-zinc-400 text-[11px] font-medium">{p.key}</span>
+                                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-md text-[11px]">
+                                                    {p.val}
+                                                  </span>
+                                                </div>
+                                              )}
+                                              {p.desc && (
+                                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight mt-1.5">
+                                                  {p.desc}
+                                                </p>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="py-4 text-xs text-zinc-400 italic bg-white dark:bg-[#101217] p-3 rounded-xl border border-zinc-200/60 dark:border-borderDark/40 text-center">
+                                        기본값(Default)을 유지하는 노드입니다.
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {node.tip && (
+                                    <div className="mt-5 pt-3 border-t border-zinc-200/60 dark:border-borderDark/50 text-[11px] text-zinc-600 dark:text-zinc-400 flex items-start gap-1.5 leading-relaxed">
+                                      <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-2 fill-none flex-shrink-0 mt-0.5" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                      <span>{node.tip}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                {/* 4. 저장된 파이프라인 열람 모드 시 노드 가이드 하단 대시보드 */}
+                {isSavedViewing && loadedSavedIndex !== null && (
+                  <section className="bg-white dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-8 space-y-6">
+                    <div className="flex items-center justify-between pb-4 border-b border-borderLight dark:border-borderDark/60">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        <h3 className="text-base md:text-lg font-bold text-zinc-900 dark:text-white">
+                          파이프라인 실행 대시보드 (메모 · 링크 · 참고 이미지)
+                        </h3>
+                      </div>
+                      <span className="text-xs text-zinc-400">저장된 파이프라인 전용 공간</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div className="bg-zinc-50 dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-2xl p-5 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <span className="text-xs font-bold text-zinc-900 dark:text-white">실행 메모</span>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="메모 작성 후 엔터 또는 추가..."
+                              value={dashMemoInput}
+                              onChange={(e) => setDashMemoInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') addBottomDashboardMemo(); }}
+                              className="flex-1 bg-white dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-zinc-200 focus:outline-none"
+                            />
+                            <button
+                              onClick={addBottomDashboardMemo}
+                              className="px-3.5 py-2 bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 rounded-xl text-xs font-semibold hover:opacity-90"
+                            >
+                              추가
+                            </button>
+                          </div>
+
+                          <div className="space-y-2 pt-2">
+                            {currentDashboard.memos?.length === 0 ? (
+                              <p className="text-xs text-zinc-400 italic">등록된 메모가 없습니다.</p>
+                            ) : (
+                              currentDashboard.memos.map((m, mIdx) => (
+                                <div key={mIdx} className="bg-white dark:bg-[#101217] p-2.5 rounded-xl border border-borderLight dark:border-borderDark flex items-center justify-between text-xs text-zinc-700 dark:text-zinc-300">
+                                  <span className="truncate pr-2">• {m}</span>
+                                  <button
+                                    onClick={() => deleteBottomDashboardMemo(mIdx)}
+                                    className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1 transition-colors flex-shrink-0"
+                                    title="메모 삭제"
+                                  >
+                                    <svg className="w-3.5 h-3.5 stroke-current stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                                      <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-zinc-50 dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-2xl p-5 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <span className="text-xs font-bold text-zinc-900 dark:text-white">관련 링크 (URL)</span>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="https://..."
+                              value={dashLinkInput}
+                              onChange={(e) => setDashLinkInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') addBottomDashboardLink(); }}
+                              className="flex-1 bg-white dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-zinc-200 focus:outline-none"
+                            />
+                            <button
+                              onClick={addBottomDashboardLink}
+                              className="px-3.5 py-2 bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 rounded-xl text-xs font-semibold hover:opacity-90"
+                            >
+                              추가
+                            </button>
+                          </div>
+
+                          <div className="space-y-2 pt-2">
+                            {currentDashboard.links?.length === 0 ? (
+                              <p className="text-xs text-zinc-400 italic">등록된 링크가 없습니다.</p>
+                            ) : (
+                              currentDashboard.links.map((lnk, lIdx) => (
+                                <div key={lIdx} className="bg-white dark:bg-[#101217] p-2.5 rounded-xl border border-borderLight dark:border-borderDark flex items-center justify-between text-xs">
+                                  <a 
+                                    href={lnk} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="truncate pr-2 text-zinc-600 dark:text-zinc-400 hover:text-emerald-500 underline"
+                                  >
+                                    🔗 {lnk}
+                                  </a>
+                                  <button
+                                    onClick={() => deleteBottomDashboardLink(lIdx)}
+                                    className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1 transition-colors flex-shrink-0"
+                                    title="링크 삭제"
+                                  >
+                                    <svg className="w-3.5 h-3.5 stroke-current stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                                      <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-zinc-50 dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-2xl p-5 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-zinc-900 dark:text-white">참고 결과물 이미지</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              ref={dashImageInputRef}
+                              onChange={handleBottomDashboardImageUpload}
+                              className="hidden"
+                              id="bottom-dash-file"
+                            />
+                            <label
+                              htmlFor="bottom-dash-file"
+                              className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer underline"
+                            >
+                              + 이미지 등록
+                            </label>
+                          </div>
+
+                          <div className="pt-2">
+                            {currentDashboard.images?.length === 0 ? (
+                              <p className="text-xs text-zinc-400 italic">등록된 이미지가 없습니다.</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-3">
+                                {currentDashboard.images.map((imgUrl, iIdx) => (
+                                  <div key={iIdx} className="relative group">
+                                    <img
+                                      src={imgUrl}
+                                      alt="Attachment"
+                                      className="w-16 h-16 object-cover rounded-xl border border-borderLight dark:border-borderDark"
+                                    />
+                                    <button
+                                      onClick={() => deleteBottomDashboardImage(iIdx)}
+                                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-900/80 hover:bg-zinc-900 dark:bg-white/80 dark:hover:bg-white text-white dark:text-black flex items-center justify-center transition-transform hover:scale-110"
+                                      title="이미지 삭제"
+                                    >
+                                      <svg className="w-3 h-3 stroke-current stroke-[2] fill-none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
+              </main>
+            ) : (
+              /* 보관함 뷰 */
+              <div className="mt-8 space-y-8">
+                {!currentUser ? (
+                  <div className="p-12 text-center bg-white dark:bg-[#14171f] border border-borderLight dark:border-borderDark rounded-3xl max-w-lg mx-auto space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 flex items-center justify-center mx-auto text-xl">
+                      🔒
+                    </div>
+                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white">로그인이 필요합니다</h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                      로그인하시면 생성한 노드와 파이프라인을 보관함에 영구 저장하고 언제 어디서든 다시 불러올 수 있습니다.
+                    </p>
+                    <button
+                      onClick={() => setAuthModal('login')}
+                      className="px-6 py-2.5 rounded-full bg-emerald-500 text-black text-xs font-bold hover:bg-emerald-400 transition-all shadow-sm"
+                    >
+                      로그인하기
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                          저장된 파이프라인 <span className="text-xs font-normal text-zinc-500">({currentUser.username} 계정)</span>
+                        </h3>
+                        <span className="text-xs text-zinc-500">총 {savedPipelines.length}개</span>
+                      </div>
+                      {savedPipelines.length === 0 ? (
+                        <div className="p-8 text-center bg-white dark:bg-[#14171f] border border-borderLight dark:border-borderDark rounded-2xl">
+                          <p className="text-sm text-zinc-500">저장된 파이프라인이 없습니다.</p>
+                        </div>
+                      ) : (
+                        <div className="grid md:grid-cols-2 gap-5">
+                          {savedPipelines.map((p, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => handleLoadSavedPipeline(p, idx)}
+                              className="bg-white dark:bg-[#14171f] border border-borderLight dark:border-borderDark hover:border-zinc-400 dark:hover:border-zinc-500 rounded-2xl p-6 transition-all group relative flex flex-col justify-between cursor-pointer"
+                            >
+                              <div>
+                                <div className="flex items-center justify-between mb-2.5">
+                                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium">
+                                    {p.platform || 'ComfyUI'}
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-zinc-500">{p.savedAt}</span>
+                                    <button
+                                      onClick={(e) => handleDeleteSavedPipeline(e, idx)}
+                                      className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                      title="파이프라인 삭제"
+                                      aria-label="Delete pipeline"
+                                    >
+                                      <svg className="w-3.5 h-3.5 stroke-current stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                                        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+                                <h4 className="text-sm font-bold text-zinc-900 dark:text-white group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
+                                  {p.title}
+                                </h4>
+                                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1.5 line-clamp-2 leading-relaxed">{p.desc}</p>
+                              </div>
+
+                              <div className="mt-5 pt-3.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400 font-medium">
+                                <span>열람 모드로 열기</span>
+                                <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-2 fill-none" viewBox="0 0 24 24">
+                                  <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-6 border-t border-borderLight dark:border-borderDark">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                          저장된 노드 <span className="text-xs font-normal text-zinc-500">({currentUser.username} 계정)</span>
+                        </h3>
+                        <span className="text-xs text-zinc-500">총 {savedNodes.length}개</span>
+                      </div>
+                      {savedNodes.length === 0 ? (
+                        <div className="p-8 text-center bg-white dark:bg-[#14171f] border border-borderLight dark:border-borderDark rounded-2xl">
+                          <p className="text-sm text-zinc-500">저장된 노드가 없습니다.</p>
+                        </div>
+                      ) : (
+                        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-5">
+                          {savedNodes.map((n) => (
+                            <div 
+                              key={n.id} 
+                              onClick={() => setSelectedNode(n)}
+                              className="bg-white dark:bg-[#14171f] border border-borderLight dark:border-borderDark hover:border-zinc-400 dark:hover:border-zinc-500 rounded-2xl p-6 flex flex-col justify-between cursor-pointer transition-all group"
+                            >
+                              <div>
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-400 px-2.5 py-0.5 rounded-full font-medium">
+                                    {n.platform} · {n.category}
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleSaveNode(n);
+                                    }}
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                    title="노드 삭제"
+                                  >
+                                    <svg className="w-3.5 h-3.5 stroke-current stroke-[1.8] fill-none" viewBox="0 0 24 24">
+                                      <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <h4 className="text-sm font-bold text-zinc-900 dark:text-white transition-colors">
+                                  {n.name}
+                                </h4>
+                                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 line-clamp-2 leading-relaxed">{n.summary}</p>
+                              </div>
+                              
+                              <div className="mt-5 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-400 font-medium">
+                                <span>상세 정보 보기</span>
+                                <svg className="w-3.5 h-3.5 stroke-zinc-400 stroke-2 fill-none group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24">
+                                  <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* 노드 상세 모달 */}
+            {selectedNode && (
+              <div
+                className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+                onClick={() => setSelectedNode(null)}
+              >
+                <div
+                  className="bg-white dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-8 max-w-lg w-full relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between pb-4 border-b border-borderLight dark:border-borderDark">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${currentConfig.categories[selectedNode.category]?.bg || 'bg-zinc-400'}`}></span>
+                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                        {platform} · {currentConfig.categories[selectedNode.category]?.label || selectedNode.category}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setSelectedNode(null)}
+                      className="w-7 h-7 rounded-full bg-zinc-100 dark:bg-[#101217] flex items-center justify-center text-zinc-400 hover:text-zinc-800 dark:hover:text-white transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+
+                  <div className="mt-5 space-y-4">
+                    <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{selectedNode.name}</h3>
+                    <div>
+                      <h5 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">노드 설명 및 사용법</h5>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 mt-1 leading-relaxed bg-zinc-50 dark:bg-[#101217] p-4 rounded-2xl border border-borderLight dark:border-borderDark/50">
+                        {selectedNode.details}
+                      </p>
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">주의점 / 팁</h5>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 mt-1 leading-relaxed bg-zinc-50 dark:bg-[#101217] p-4 rounded-2xl border border-borderLight dark:border-borderDark/50">
+                        {selectedNode.tip}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      onClick={() => {
+                        toggleSaveNode(selectedNode);
+                        setSelectedNode(null);
+                      }}
+                      className="px-5 py-2 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-black text-xs font-semibold hover:opacity-90 transition-all"
+                    >
+                      {savedNodes.some(n => n.id === selectedNode.id) ? '저장 해제' : '이 노드 저장하기'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 인증 모달 */}
+            {authModal && (
+              <div 
+                className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+                onClick={() => setAuthModal(null)}
+              >
+                <div 
+                  className="bg-white dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-8 max-w-sm w-full relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between pb-3 mb-4 border-b border-borderLight dark:border-borderDark">
+                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                      {authModal === 'login' && '로그인'}
+                      {authModal === 'register' && '회원가입'}
+                      {authModal === 'find' && '아이디 / 비밀번호 찾기'}
+                    </h3>
+                    <button 
+                      onClick={() => setAuthModal(null)}
+                      className="text-zinc-400 hover:text-zinc-800 dark:hover:text-white p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {authModal === 'login' && (
+                    <form onSubmit={handleLogin} className="space-y-3.5">
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">아이디</label>
+                        <input
+                          type="text"
+                          required
+                          value={authForm.username}
+                          onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">비밀번호</label>
+                        <input
+                          type="password"
+                          required
+                          value={authForm.password}
+                          onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full mt-2 py-2.5 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-black font-semibold text-xs hover:opacity-90"
+                      >
+                        로그인
+                      </button>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                        <button type="button" onClick={() => { setAuthModal('find'); setFoundAccountInfo(null); }} className="hover:underline">
+                          아이디/비밀번호 찾기
+                        </button>
+                        <button type="button" onClick={() => setAuthModal('register')} className="hover:underline text-emerald-500 font-semibold">
+                          새 계정 만들기 (회원가입)
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {authModal === 'register' && (
+                    <form onSubmit={handleRegister} className="space-y-3.5">
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">아이디</label>
+                        <input
+                          type="text"
+                          required
+                          value={authForm.username}
+                          onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">비밀번호</label>
+                        <input
+                          type="password"
+                          required
+                          value={authForm.password}
+                          onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">분실 인증용 이메일</label>
+                        <input
+                          type="email"
+                          required
+                          placeholder="name@example.com"
+                          value={authForm.email}
+                          onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full mt-2 py-2.5 rounded-xl bg-emerald-500 text-black font-semibold text-xs hover:bg-emerald-400"
+                      >
+                        가입 완료하기
+                      </button>
+                      <div className="text-center text-[11px] text-zinc-400 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                        이미 계정이 있으신가요? <button type="button" onClick={() => setAuthModal('login')} className="hover:underline text-emerald-500 font-semibold ml-1">로그인</button>
+                      </div>
+                    </form>
+                  )}
+
+                  {authModal === 'find' && (
+                    <form onSubmit={handleFindAccount} className="space-y-3.5">
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">가입 시 등록한 이메일</label>
+                        <input
+                          type="email"
+                          required
+                          placeholder="name@example.com"
+                          value={authForm.email}
+                          onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                          className="w-full mt-1 bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      {foundAccountInfo && (
+                        <div className="p-3 bg-zinc-100 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl space-y-2">
+                          <div className="text-xs">
+                            <span className="text-zinc-400">가입된 아이디: </span>
+                            <span className="font-bold text-emerald-500">{foundAccountInfo.username}</span>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">새 비밀번호 설정</label>
+                            <input
+                              type="password"
+                              placeholder="새 비밀번호 입력..."
+                              value={authForm.newPassword}
+                              onChange={(e) => setAuthForm({ ...authForm, newPassword: e.target.value })}
+                              className="w-full mt-1 bg-white dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        className="w-full mt-2 py-2.5 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-black font-semibold text-xs hover:opacity-90"
+                      >
+                        {foundAccountInfo ? '비밀번호 재설정 완료' : '계정 조회'}
+                      </button>
+
+                      <div className="text-center text-[11px] text-zinc-400 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                        <button type="button" onClick={() => setAuthModal('login')} className="hover:underline">
+                          로그인으로 돌아가기
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 커스텀 다이얼로그 팝업 */}
+            {dialogConfig && (
+              <div 
+                className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+                onClick={() => {
+                  if (dialogConfig.onCancel) dialogConfig.onCancel();
+                  else if (dialogConfig.onConfirm) dialogConfig.onConfirm();
+                }}
+              >
+                <div 
+                  className="bg-white dark:bg-[#161922] border border-borderLight dark:border-borderDark rounded-3xl p-6 md:p-7 max-w-md w-full relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start gap-3.5 mb-4">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border border-zinc-200 dark:border-zinc-700">
+                      <svg className="w-4 h-4 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+                    </div>
+
+                    <div className="flex-1">
+                      <h4 className="text-base font-bold text-zinc-900 dark:text-white">
+                        {dialogConfig.title}
+                      </h4>
+                      <p className="text-xs md:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed whitespace-pre-line">
+                        {dialogConfig.message}
+                      </p>
+                    </div>
+                  </div>
+
+                  {dialogConfig.type === 'prompt' && (
+                    <div className="mt-4 mb-2">
+                      <input
+                        type="text"
+                        value={promptInputValue}
+                        onChange={(e) => setPromptInputValue(e.target.value)}
+                        placeholder="AI Studio 키를 입력하세요..."
+                        className="w-full bg-zinc-50 dark:bg-[#101217] border border-borderLight dark:border-borderDark rounded-xl px-4 py-2.5 text-xs md:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-400"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') dialogConfig.onConfirm(promptInputValue);
+                          else if (e.key === 'Escape') dialogConfig.onCancel();
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  <div className="mt-6 flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100 dark:border-zinc-800/80">
+                    {dialogConfig.onCancel && (
+                      <button
+                        onClick={dialogConfig.onCancel}
+                        className="px-4 py-2 rounded-full border border-borderLight dark:border-borderDark text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                      >
+                        취소
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (dialogConfig.type === 'prompt') {
+                          dialogConfig.onConfirm(promptInputValue);
+                        } else {
+                          dialogConfig.onConfirm();
+                        }
+                      }}
+                      className="px-5 py-2 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-black text-xs font-bold hover:opacity-90 transition-colors"
+                    >
+                      확인
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 우측 하단 고정 상단 이동 버튼 */}
+            {showScrollTop && (
+              <button
+                onClick={scrollToTop}
+                className="fixed bottom-8 right-8 z-40 w-11 h-11 rounded-full bg-white dark:bg-[#1a1e27] border border-borderLight dark:border-borderDark shadow-sm hover:border-zinc-400 dark:hover:border-zinc-500 text-zinc-600 dark:text-zinc-300 flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+                title="페이지 상단으로 이동"
+                aria-label="Scroll to top"
+              >
+                <svg className="w-4 h-4 stroke-current stroke-2 fill-none" viewBox="0 0 24 24">
+                  <path d="M5 15l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
