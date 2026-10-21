@@ -449,6 +449,46 @@
         }
       };
 
+      // 파이프라인 JSON 내보내기 다운로드 함수
+      const handleExportJSON = () => {
+        if (!pipeline) return;
+
+        const exportData = {
+          platform,
+          title: pipeline.title || "Untitled Pipeline",
+          desc: pipeline.desc || "",
+          generalGuide: pipeline.generalGuide || "",
+          exportedAt: new Date().toISOString(),
+          stages: (pipeline.stages || []).map(stage => ({
+            stageName: stage.stageName,
+            nodes: (stage.nodes || []).map(node => ({
+              id: node.id,
+              category: node.category,
+              name: node.name,
+              summary: node.summary,
+              details: node.details,
+              tip: node.tip,
+              params: node.params || []
+            }))
+          })),
+          connections: pipeline.connections || []
+        };
+
+        const jsonString = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const safeTitle = (pipeline.title || "pipeline").replace(/[/\\?%*:|"<>]/g, "_").trim();
+        link.href = url;
+        link.download = `${platform}_${safeTitle}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast("JSON 파일 다운로드가 완료되었습니다.");
+      };
+
       const handleRegister = (e) => {
         e.preventDefault();
         const { username, password, email } = authForm;
@@ -643,13 +683,11 @@
         };
       }, [isPipelineOpen, canvasZoom]);
 
-      // 올바른 연결선 계산 로직 (AI 및 워크플로우 정의 기반)
       const calculateConnections = useCallback(() => {
         if (!canvasBoardRef.current || !isPipelineOpen) return;
         const boardEl = canvasBoardRef.current;
         const newConnections = [];
 
-        // 전체 노드 맵 구성
         const allNodesMap = {};
         (pipeline.stages || []).forEach(stage => {
           (stage.nodes || []).forEach(n => {
@@ -657,7 +695,6 @@
           });
         });
 
-        // 명시된 connections 사용 (없을 경우 스테이지별 기본 연결)
         const definedConnections = pipeline.connections || [];
 
         definedConnections.forEach((conn, idx) => {
@@ -970,7 +1007,6 @@
 
         const categoryKeys = Object.keys(currentConfig.categories).join(" | ");
 
-        // AI에게 실제 유효한 소켓/노드 연결 정보를 요구하도록 프롬프트 구성
         const systemPrompt = `당신은 ${platform} 전문 테크니컬 아티스트이자 파이프라인 아키텍트입니다.
 사용자의 프롬프트와 참조 이미지를 분석하여 실제 ${platform}에서 오류 없이 동작하는 정확한 노드 워크플로우와 연결선(connections)을 설계하세요.
 
@@ -1101,7 +1137,7 @@
         }`}>
           <div className="max-w-7xl mx-auto px-6 py-8">
             
-            {/* 토스트 알림 팝업 */}
+            {/* 토스트 알림 */}
             {toastMessage && (
               <div className="fixed top-6 right-6 z-50 flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-black px-4 py-2.5 rounded-xl text-xs font-semibold border border-zinc-700 dark:border-zinc-300 shadow-lg">
                 <svg className="w-3.5 h-3.5 stroke-current stroke-2 fill-none" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -1147,7 +1183,7 @@
                 </div>
               </div>
 
-              {/* Header Right Utilities */}
+              {/* Header Right */}
               <div className="flex items-center gap-2.5">
                 <button
                   onClick={toggleTheme}
@@ -1211,7 +1247,7 @@
             {!viewSavedTab ? (
               <main className="mt-8 space-y-10">
 
-                {/* 1. 프롬프트 및 이미지 첨부 입력 섹션 */}
+                {/* 1. 프롬프트 및 이미지 첨부 입력 */}
                 {!isSavedViewing && (
                   <div className="max-w-3xl">
                     <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
@@ -1322,6 +1358,18 @@
                     </div>
 
                     <div className="flex items-center gap-4 flex-shrink-0 pt-0.5">
+                      {/* JSON 다운로드 버튼 */}
+                      <button
+                        onClick={handleExportJSON}
+                        className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors flex items-center gap-1 text-xs whitespace-nowrap"
+                        title="가이드 수치 포함 JSON 파일 다운로드"
+                      >
+                        <svg className="w-4 h-4 stroke-current stroke-[1.8] fill-none flex-shrink-0" viewBox="0 0 24 24">
+                          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className="whitespace-nowrap">JSON 다운로드</span>
+                      </button>
+
                       {!isSavedViewing && (
                         <button
                           onClick={saveCurrentPipeline}
@@ -2019,7 +2067,7 @@
                       {authModal === 'find' && '아이디 / 비밀번호 찾기'}
                     </h3>
                     <button 
-                      onClick={() => setAuthModal(null)}
+                      onClick={() => setAuthModal(null)} 
                       className="text-zinc-400 hover:text-zinc-800 dark:hover:text-white p-1"
                     >
                       ✕
@@ -2161,7 +2209,7 @@
               </div>
             )}
 
-            {/* 커스텀 다이얼로그 팝업 */}
+            {/* 커스텀 다이얼로그 */}
             {dialogConfig && (
               <div 
                 className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50"
@@ -2232,7 +2280,7 @@
               </div>
             )}
 
-            {/* 우측 하단 고정 상단 이동 버튼 */}
+            {/* Scroll to Top */}
             {showScrollTop && (
               <button
                 onClick={scrollToTop}
