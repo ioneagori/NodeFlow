@@ -1011,7 +1011,7 @@
   ]
 }`;
 
-        const targetModel = "models/gemini-2.5-flash";
+        const targetModel = "models/gemini-3.8-flash";
         const url = `https://generativelanguage.googleapis.com/v1beta/${targetModel}:generateContent?key=${geminiApiKey}`;
 
         const parts = [{ text: `${systemPrompt}\n\n사용자 요청: ${query || "첨부된 이미지를 참조하여 이를 재현하거나 응용할 수 있는 파이프라인을 설계해줘"}` }];
